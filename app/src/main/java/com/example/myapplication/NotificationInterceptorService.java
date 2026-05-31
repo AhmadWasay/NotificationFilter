@@ -40,7 +40,6 @@ public class NotificationInterceptorService extends NotificationListenerService 
     @Override
     public void onCreate() {
         super.onCreate();
-        Log.d(TAG, "Service Created");
         classifier = new NotificationClassifier(this);
         createNotificationChannels();
         startForegroundService();
@@ -49,54 +48,45 @@ public class NotificationInterceptorService extends NotificationListenerService 
     @Override
     public void onListenerConnected() {
         super.onListenerConnected();
-        Log.d(TAG, "Notification Listener Connected");
+        syncExistingNotifications();
     }
 
-    @Override
-    public void onListenerDisconnected() {
-        super.onListenerDisconnected();
-        Log.d(TAG, "Notification Listener Disconnected");
+    private void syncExistingNotifications() {
+        executorService.execute(() -> {
+            StatusBarNotification[] active = getActiveNotifications();
+            if (active != null) {
+                for (StatusBarNotification sbn : active) {
+                    // Process silently during initial sync
+                    processNotification(sbn, false);
+                }
+            }
+        });
     }
 
     private void createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
             if (manager != null) {
-                // Persistent Service Channel
-                NotificationChannel serviceChannel = new NotificationChannel(
-                        CHANNEL_ID,
-                        "Notification Filter Service",
-                        NotificationManager.IMPORTANCE_LOW
-                );
+                NotificationChannel serviceChannel = new NotificationChannel(CHANNEL_ID, "Filter Service", NotificationManager.IMPORTANCE_LOW);
                 manager.createNotificationChannel(serviceChannel);
 
-                // Emergency Alarm Channel
-                NotificationChannel alarmChannel = new NotificationChannel(
-                        ALARM_CHANNEL_ID,
-                        "Emergency Alerts",
-                        NotificationManager.IMPORTANCE_HIGH
-                );
+                NotificationChannel alarmChannel = new NotificationChannel(ALARM_CHANNEL_ID, "Emergency Alerts", NotificationManager.IMPORTANCE_HIGH);
                 alarmChannel.setSound(null, null);
-                alarmChannel.enableVibration(true);
-                alarmChannel.setLockscreenVisibility(android.app.Notification.VISIBILITY_PUBLIC);
                 manager.createNotificationChannel(alarmChannel);
             }
         }
     }
 
     private void startForegroundService() {
-        Intent notificationIntent = new Intent(this, MainActivity.class);
-        PendingIntent pendingIntent = PendingIntent.getActivity(this,
-                0, notificationIntent, PendingIntent.FLAG_IMMUTABLE);
-
+        Intent intent = new Intent(this, MainActivity.class);
+        PendingIntent pending = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE);
         android.app.Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Notification Filter Active")
-                .setContentText("Protecting you from promotional spam...")
+                .setContentText("Intelligent AI protection running...")
                 .setSmallIcon(R.mipmap.ic_launcher)
-                .setContentIntent(pendingIntent)
+                .setContentIntent(pending)
                 .setOngoing(true)
                 .build();
-
         startForeground(1, notification);
     }
 
@@ -110,154 +100,101 @@ public class NotificationInterceptorService extends NotificationListenerService 
 
     private void stopEmergencyAlarm() {
         if (mediaPlayer != null) {
-            try {
-                if (mediaPlayer.isPlaying()) {
-                    mediaPlayer.stop();
-                }
-                mediaPlayer.release();
-                mediaPlayer = null;
-                Log.d(TAG, "Emergency alarm stopped by user.");
-            } catch (Exception e) {
-                Log.e(TAG, "Error stopping media player", e);
-            }
+            try { mediaPlayer.stop(); mediaPlayer.release(); mediaPlayer = null; } catch (Exception e) {}
         }
         NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        if (manager != null) {
-            manager.cancel(ALARM_NOTIFICATION_ID);
-        }
+        if (manager != null) manager.cancel(ALARM_NOTIFICATION_ID);
     }
 
     @Override
     public void onNotificationPosted(StatusBarNotification sbn) {
-        String packageName = sbn.getPackageName();
-        Log.d(TAG, "Received notification from: " + packageName);
+        processNotification(sbn, true);
+    }
 
-        if (packageName.equals(getPackageName()) || 
-            packageName.contains("netspeed") || 
-            packageName.equals("android") || 
-            packageName.equals("com.android.systemui")) {
-            return;
-        }
+    private void processNotification(StatusBarNotification sbn, boolean allowAlarm) {
+        String rawPkg = sbn.getPackageName();
+        if (rawPkg.equals(getPackageName()) || rawPkg.contains("netspeed") || rawPkg.equals("android")) return;
 
+        // Resolve App Name
+        String appDisplayName = getAppName(rawPkg);
+        
         Bundle extras = sbn.getNotification().extras;
         String title = extras.getString(android.app.Notification.EXTRA_TITLE, "");
         
+        // Comprehensive Text Capture
         CharSequence textChar = extras.getCharSequence(android.app.Notification.EXTRA_TEXT);
         CharSequence bigTextChar = extras.getCharSequence(android.app.Notification.EXTRA_BIG_TEXT);
-        CharSequence subTextChar = extras.getCharSequence(android.app.Notification.EXTRA_SUB_TEXT);
-        
-        String tempText = "";
-        if (textChar != null) tempText = textChar.toString();
-        else if (bigTextChar != null) tempText = bigTextChar.toString();
-        else if (subTextChar != null) tempText = subTextChar.toString();
-        
-        final String text = tempText;
+        String text = (textChar != null) ? textChar.toString() : (bigTextChar != null ? bigTextChar.toString() : "");
 
-        // 5. Filter out aggregate noise and low-value updates
         if (title.isEmpty() && text.isEmpty()) return;
-        
-        // Filter out "X new messages" (WhatsApp noise seen in your screenshot)
-        if (text.matches("^\\d+ new messages?$") || text.contains("Checking for new messages")) {
-            return;
-        }
+        if (text.matches("^\\d+ new messages?$")) return;
 
-        // 6. Robust De-duplication (Improved for WhatsApp Group variations)
-        // Extract base title (remove sender name after colon in groups)
-        String baseTitle = title.split(":")[0].trim();
-        String currentContent = packageName + "|" + baseTitle + "|" + text;
+        // Strict 10s De-duplication
+        String currentContent = rawPkg + "|" + title + "|" + text;
         long currentTime = System.currentTimeMillis();
-        
-        boolean isAlarming = classifier.isAlarming(title, text);
-        
-        // Use a 5s window for group chat de-duplication to prevent the double cards
-        if (!isAlarming && currentContent.equals(lastNotificationContent) && (currentTime - lastNotificationTime < 5000)) {
-            return;
-        }
+        if (currentContent.equals(lastNotificationContent) && (currentTime - lastNotificationTime < 10000)) return;
         
         lastNotificationContent = currentContent;
         lastNotificationTime = currentTime;
 
-        Log.d(TAG, "INTERCEPTING: " + title);
-
         executorService.execute(() -> {
             try {
+                boolean isAlarming = classifier.isAlarming(title, text);
                 boolean isSpam = !isAlarming && classifier.isSpam(title, text);
-                String cleanedText = cleanNotificationText(title, text);
-                String summary = classifier.summarize(title, cleanedText);
+                String summary = classifier.summarize(title, text);
 
-                if (isAlarming) {
-                    playEmergencyAlarm(title, text);
-                } else if (isSpam) {
-                    cancelNotification(sbn.getKey());
-                }
+                if (isAlarming && allowAlarm) playEmergencyAlarm(title, text);
+                else if (isSpam) cancelNotification(sbn.getKey());
 
+                // Save to DB: appDisplayName goes into packageName field for UI mapping
                 NotificationEntity entity = new NotificationEntity(
-                        packageName, title, text, summary, System.currentTimeMillis(), isSpam);
+                        appDisplayName, title, text, summary, System.currentTimeMillis(), isSpam);
                 AppDatabase.getInstance(getApplicationContext()).notificationDao().insert(entity);
 
-                Intent refreshIntent = new Intent("com.example.myapplication.REFRESH_UI");
-                refreshIntent.setPackage(getPackageName());
-                sendBroadcast(refreshIntent);
-                
+                Intent refresh = new Intent("com.example.myapplication.REFRESH_UI");
+                refresh.setPackage(getPackageName());
+                sendBroadcast(refresh);
             } catch (Exception e) {
-                Log.e(TAG, "Error processing", e);
+                Log.e(TAG, "Error", e);
             }
         });
     }
 
-    private String cleanNotificationText(String title, String text) {
-        if (text == null || text.isEmpty()) return "";
-        if (title != null && text.startsWith(title)) {
-            String cleaned = text.replaceFirst(title + "[:\\s]*", "");
-            return cleaned.isEmpty() ? text : cleaned;
+    private String getAppName(String packageName) {
+        try {
+            android.content.pm.PackageManager pm = getPackageManager();
+            return (String) pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0));
+        } catch (Exception e) {
+            return packageName;
         }
-        return text.replaceAll("^[\\w\\s]+:\\s*", "");
     }
 
     private void playEmergencyAlarm(String title, String text) {
         try {
-            if (mediaPlayer != null) {
-                stopEmergencyAlarm();
-            }
-
-            Uri alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
+            if (mediaPlayer != null) stopEmergencyAlarm();
             mediaPlayer = new MediaPlayer();
-            mediaPlayer.setDataSource(getApplicationContext(), alarmUri);
-            mediaPlayer.setAudioAttributes(new AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build());
+            mediaPlayer.setDataSource(getApplicationContext(), RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM));
+            mediaPlayer.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build());
             mediaPlayer.setLooping(true);
             mediaPlayer.prepare();
             mediaPlayer.start();
-            
             showStopAlarmNotification(title, text);
-            Log.d(TAG, "Emergency alarm started with looping.");
-        } catch (Exception e) {
-            Log.e(TAG, "MediaPlayer error", e);
-        }
+        } catch (Exception e) {}
     }
 
     private void showStopAlarmNotification(String title, String text) {
-        Intent stopIntent = new Intent(this, NotificationInterceptorService.class);
-        stopIntent.setAction(ACTION_STOP_ALARM);
-        PendingIntent stopPendingIntent = PendingIntent.getService(this, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE);
-
+        Intent intent = new Intent(this, NotificationInterceptorService.class);
+        intent.setAction(ACTION_STOP_ALARM);
+        PendingIntent pending = PendingIntent.getService(this, 0, intent, PendingIntent.FLAG_IMMUTABLE);
         android.app.Notification notification = new NotificationCompat.Builder(this, ALARM_CHANNEL_ID)
                 .setContentTitle("EMERGENCY ALERT: " + title)
                 .setContentText(text)
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setPriority(NotificationCompat.PRIORITY_MAX)
-                .setCategory(NotificationCompat.CATEGORY_ALARM)
-                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                .addAction(R.drawable.ic_launcher_foreground, "STOP ALARM", stopPendingIntent)
+                .addAction(R.drawable.ic_launcher_foreground, "STOP ALARM", pending)
                 .setOngoing(true)
                 .build();
-
         NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        if (manager != null) {
-            manager.notify(ALARM_NOTIFICATION_ID, notification);
-            Log.d(TAG, "Emergency notification shown.");
-        }
+        if (manager != null) manager.notify(ALARM_NOTIFICATION_ID, notification);
     }
 }

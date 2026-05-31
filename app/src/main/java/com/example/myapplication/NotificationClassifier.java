@@ -136,49 +136,62 @@ public class NotificationClassifier {
     }
 
     public String summarize(String title, String text) {
-        if (text == null || text.isEmpty()) return "AI: Someone sent a message.";
+        if (text == null || text.isEmpty()) return "AI: An empty notification was received.";
 
         if (isAlarming(title, text)) {
-            return "URGENT ALERT: Potential emergency detected from " + title + ". Please act now.";
+            return "🚨 URGENT: This message contains indicators of a high-priority emergency. " +
+                   "The sender mentions: \"" + text.trim() + "\". Please check on them immediately.";
         }
         
-        String cleanText = text.toLowerCase().trim();
+        String cleanText = text.trim();
         String cleanTitle = title.toLowerCase();
+        String lowerText = cleanText.toLowerCase();
         
-        // 1. Academic & University Context (Based on your screenshot)
-        if (cleanText.contains("exam") || cleanText.contains("terminal") || cleanText.contains("date sheet")) {
-            return "AI: Important update regarding your examination schedule/date sheet.";
-        }
-        if (cleanText.contains(".xlsx") || cleanText.contains(".pdf") || cleanText.contains(".doc")) {
-            return "AI: " + title + " shared an academic document or spreadsheet.";
-        }
-        if (cleanTitle.contains("section") || cleanTitle.contains("bscs")) {
-            if (cleanText.contains("presentation") || cleanText.contains("slide")) return "AI: Coordination for group presentations in " + title + ".";
-            return "AI: Academic discussion or announcement in your class group (" + title + ").";
-        }
-
-        // 2. WhatsApp / Messaging Specific Logic
-        if (cleanText.contains("sticker")) return "AI: " + title + " sent a sticker.";
-        if (cleanText.contains("photo") || cleanText.contains("image")) return "AI: " + title + " shared a photo.";
-        if (cleanText.contains("video")) return "AI: " + title + " shared a video.";
-        if (cleanText.contains("location")) return "AI: " + title + " shared their location.";
-        if (cleanText.contains("audio") || cleanText.contains("voice message")) return "AI: " + title + " sent a voice note.";
-        if (cleanText.equals("message") || cleanText.isEmpty()) return "AI: " + title + " sent a message.";
-
-        // 3. Coordination & Schedule
-        if (cleanText.contains("meeting") || cleanText.contains("zoom") || cleanText.contains("class")) return "AI: Scheduling details for a meeting or lecture.";
-        if (cleanText.contains("assignment") || cleanText.contains("homework")) return "AI: Reminder or update regarding pending assignments.";
-        if (cleanText.contains("otp") || cleanText.contains("verification code")) return "AI: Security verification requested.";
-        if (cleanText.contains("hi") || cleanText.contains("hello") || cleanText.contains("hey")) return "AI: " + title + " is greeting you.";
-
-        // 4. Smart Content Synthesis (Synthesizing the actual text context)
-        String[] words = text.split("\\s+");
-        if (words.length > 3) {
-            String snippet = words[0] + " " + words[1] + " " + (words.length > 2 ? words[2] : "");
-            return "AI: Content regarding \"" + snippet + "...\"";
+        // 1. Career & Professional Context (LinkedIn/Jobs)
+        if (cleanTitle.contains("linkedin") || lowerText.contains("hiring") || lowerText.contains("job") || lowerText.contains("developer")) {
+            if (lowerText.contains("hiring")) {
+                String company = extractKeywordAfter(cleanText, "is hiring");
+                return "AI: LinkedIn Career Alert - A company " + (company.isEmpty() ? "" : "(\"" + company + "\") ") + 
+                       "is currently recruiting for a position matching your profile.";
+            }
+            if (lowerText.contains("view") || lowerText.contains("update")) {
+                return "AI: Professional Network Update - You have new activity on LinkedIn, including profile views or networking suggestions.";
+            }
+            return "AI: Professional notification regarding career opportunities or network activity.";
         }
 
-        return "AI: Summarized communication from " + title + ".";
+        // 2. Academic & University Context
+        if (lowerText.contains("exam") || lowerText.contains("terminal") || lowerText.contains("date sheet") || lowerText.contains("presentation")) {
+            return "AI: Academic Notice - Discussion detected regarding upcoming exams, presentations, or schedule changes. " + 
+                   "Details: \"" + (cleanText.length() > 40 ? cleanText.substring(0, 37) + "..." : cleanText) + "\"";
+        }
+
+        // 3. Media & Stickers
+        if (lowerText.contains("sticker")) return "AI: Digital expression - " + title + " shared a sticker in your conversation.";
+        if (lowerText.contains("photo") || lowerText.contains("image")) return "AI: Visual content - " + title + " has shared an image with you.";
+
+        // 4. Smart Intent Synthesis (Dynamic & Unique)
+        String[] words = cleanText.split("\\s+");
+        if (words.length > 2) {
+            // Create highly specific summaries by focusing on unique identifiers in the message
+            String detail = (words.length > 5) ? words[words.length - 1] : words[words.length - 1];
+            String context = words[0] + " " + words[1];
+            
+            return "AI Analysis: Detecting communication about \"" + context + "...\" involving " + detail + ". " +
+                   "This appears to be a unique update from " + title + ".";
+        }
+
+        return "AI: Individual notification from " + title + " containing: \"" + cleanText + "\"";
+    }
+
+    private String extractKeywordAfter(String text, String target) {
+        int idx = text.toLowerCase().indexOf(target.toLowerCase());
+        if (idx != -1) {
+            String sub = text.substring(0, idx).trim();
+            String[] parts = sub.split("\\s+");
+            return parts.length > 0 ? parts[parts.length - 1] : "";
+        }
+        return "";
     }
 
     public String generateCollectiveSummary(List<String> spamTexts) {

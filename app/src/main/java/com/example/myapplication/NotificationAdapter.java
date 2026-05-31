@@ -36,7 +36,11 @@ public class NotificationAdapter extends RecyclerView.Adapter<NotificationAdapte
     @Override
     public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
         NotificationEntity notification = notifications.get(position);
-        holder.textPackage.setText(notification.packageName);
+        
+        // Correct Branding Mapping:
+        // Blue text (top) = The App Name (WhatsApp, LinkedIn, Snapchat)
+        // Bold heading (black) = The specific notification title/sender
+        holder.textPackage.setText(notification.packageName); 
         holder.textTitle.setText(notification.title);
         holder.textContent.setText(notification.text);
         

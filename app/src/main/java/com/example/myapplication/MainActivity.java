@@ -138,19 +138,36 @@ public class MainActivity extends AppCompatActivity {
 
     private void loadNotifications() {
         int selectedTab = tabLayout.getSelectedTabPosition();
+        
+        // Handle Clear Button Visibility: Hidden for "24 Hours" (Tab Index 1)
+        if (selectedTab == 1) {
+            findViewById(R.id.btn_clear).setVisibility(View.GONE);
+        } else {
+            findViewById(R.id.btn_clear).setVisibility(View.VISIBLE);
+        }
+
         executorService.execute(() -> {
             try {
                 List<NotificationEntity> notifications;
                 long currentTime = System.currentTimeMillis();
+
+                // Check if System Notification History is enabled
+                boolean isSystemHistoryEnabled = Settings.Secure.getInt(getContentResolver(), 
+                        "notification_history_enabled", 0) == 1;
 
                 if (selectedTab == 0) { // Recent
                     long lastCleared = prefs.getLong(PREF_CLEAR_RECENT, 0);
                     long since = Math.max(lastCleared, currentTime - FOUR_HOURS);
                     notifications = AppDatabase.getInstance(this).notificationDao().getNormalNotificationsSince(since);
                 } else if (selectedTab == 1) { // 24 Hours
-                    long lastCleared = prefs.getLong(PREF_CLEAR_24H, 0);
-                    long since = Math.max(lastCleared, currentTime - TWENTY_FOUR_HOURS);
-                    notifications = AppDatabase.getInstance(this).notificationDao().getNormalNotificationsSince(since);
+                    if (isSystemHistoryEnabled) {
+                        long lastCleared = prefs.getLong(PREF_CLEAR_24H, 0);
+                        long since = Math.max(lastCleared, currentTime - TWENTY_FOUR_HOURS);
+                        notifications = AppDatabase.getInstance(this).notificationDao().getNormalNotificationsSince(since);
+                    } else {
+                        // Empty list if system history is disabled, with a prompt in mainHandler
+                        notifications = new ArrayList<>();
+                    }
                 } else { // Spam Digest
                     long lastCleared = prefs.getLong(PREF_CLEAR_SPAM, 0);
                     notifications = AppDatabase.getInstance(this).notificationDao().getSpamNotificationsSince(lastCleared);
@@ -159,6 +176,11 @@ public class MainActivity extends AppCompatActivity {
                 mainHandler.post(() -> {
                     if (notifications.isEmpty()) {
                         textEmpty.setVisibility(View.VISIBLE);
+                        if (selectedTab == 1 && !isSystemHistoryEnabled) {
+                            textEmpty.setText("System Notification History is disabled.\nPlease enable it in Android Settings to see 24h history.");
+                        } else {
+                            textEmpty.setText("Everything is clean!");
+                        }
                         recyclerView.setVisibility(View.GONE);
                         cardCollectiveSummary.setVisibility(View.GONE);
                     } else {
