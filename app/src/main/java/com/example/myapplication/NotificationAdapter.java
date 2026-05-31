@@ -11,11 +11,15 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import com.example.myapplication.database.NotificationEntity;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 public class NotificationAdapter extends RecyclerView.Adapter<NotificationAdapter.ViewHolder> {
     private List<NotificationEntity> notifications = new ArrayList<>();
+    private final SimpleDateFormat timeFormat = new SimpleDateFormat("hh:mm a", Locale.getDefault());
 
     public void setNotifications(List<NotificationEntity> notifications) {
         this.notifications = notifications;
@@ -36,8 +40,11 @@ public class NotificationAdapter extends RecyclerView.Adapter<NotificationAdapte
         holder.textTitle.setText(notification.title);
         holder.textContent.setText(notification.text);
         
+        String formattedTime = timeFormat.format(new Date(notification.timestamp));
+        holder.textTime.setText(formattedTime);
+        
         if (notification.summary != null && !notification.summary.isEmpty()) {
-            holder.textSummary.setText("AI Summary: " + notification.summary);
+            holder.textSummary.setText(notification.summary);
             holder.textSummary.setVisibility(View.VISIBLE);
         } else {
             holder.textSummary.setVisibility(View.GONE);
@@ -58,11 +65,12 @@ public class NotificationAdapter extends RecyclerView.Adapter<NotificationAdapte
     }
 
     static class ViewHolder extends RecyclerView.ViewHolder {
-        TextView textPackage, textTitle, textContent, textStatus, textSummary;
+        TextView textPackage, textTitle, textContent, textStatus, textSummary, textTime;
 
         ViewHolder(View itemView) {
             super(itemView);
             textPackage = itemView.findViewById(R.id.text_package);
+            textTime = itemView.findViewById(R.id.text_time);
             textTitle = itemView.findViewById(R.id.text_title);
             textContent = itemView.findViewById(R.id.text_content);
             textStatus = itemView.findViewById(R.id.text_status);

@@ -10,14 +10,14 @@ public interface NotificationDao {
     @Insert
     void insert(NotificationEntity notification);
 
-    @Query("SELECT * FROM notifications ORDER BY timestamp DESC")
-    List<NotificationEntity> getAllNotifications();
+    @Query("SELECT * FROM notifications WHERE isSpam = 1 AND timestamp >= :since ORDER BY timestamp DESC")
+    List<NotificationEntity> getSpamNotificationsSince(long since);
 
-    @Query("SELECT * FROM notifications WHERE isSpam = 1 ORDER BY timestamp DESC")
-    List<NotificationEntity> getSpamNotifications();
+    @Query("SELECT * FROM notifications WHERE isSpam = 0 AND timestamp >= :since ORDER BY timestamp DESC")
+    List<NotificationEntity> getNormalNotificationsSince(long since);
 
-    @Query("SELECT * FROM notifications WHERE isSpam = 0 ORDER BY timestamp DESC")
-    List<NotificationEntity> getNormalNotifications();
+    @Query("DELETE FROM notifications WHERE timestamp < :threshold")
+    void deleteOldNotifications(long threshold);
 
     @Query("DELETE FROM notifications")
     void deleteAll();
