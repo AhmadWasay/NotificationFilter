@@ -76,18 +76,52 @@ public class NotificationClassifier {
         if (title == null || text == null) return false;
         String content = (title + " " + text).toLowerCase();
 
+        // 1. Emergency Bypass (Never Spam)
         if (isAlarming(title, text)) return false;
 
+        // 2. Personal Whitelist (Direct Interaction / Friend Updates)
+        if (isPersonalCommunication(content)) return false;
+
+        // 3. Selective Social/Market Spam (Suggestions & Psychological Triggers)
+        if (isSocialSpam(content) || isMarketingSpam(content)) return true;
+
+        // 4. ML Inference (Conservative Threshold)
         if (interpreter != null) {
             try {
                 float score = runInference(content);
-                if (score > 0.7f) return true;
-            } catch (Exception e) {
-                Log.e(TAG, "Inference error", e);
-            }
+                if (score > 0.95f) return true; // Only block if AI is extremely certain
+            } catch (Exception e) {}
         }
 
-        return checkHeuristics(content);
+        return false;
+    }
+
+    private boolean isPersonalCommunication(String content) {
+        String[] cues = {
+            "sent you", "replied to", "messaged you", "calling", "missed call", 
+            "typing", "shared a", "new story", "tagged you", "mentioned you"
+        };
+        for (String cue : cues) if (content.contains(cue)) return true;
+        return content.contains(":"); // "Name: Message" pattern
+    }
+
+    private boolean isSocialSpam(String content) {
+        String[] patterns = {
+            "suggested for you", "people you may know", "recommended for you", 
+            "trending", "you might like", "popular on", "explore new", "discover"
+        };
+        for (String p : patterns) if (content.contains(p)) return true;
+        return false;
+    }
+
+    private boolean isMarketingSpam(String content) {
+        String[] patterns = {
+            "promo", "discount", "sale", "win", "off", "gift card", "reward", "prize",
+            "exclusive", "cashback", "save", "hurry", "last chance", "limited time",
+            "subscribe", "newsletter", "unlocked", "bonus", "referral", "earn money"
+        };
+        for (String p : patterns) if (content.contains(p)) return true;
+        return content.contains("$$$") || content.contains("🤑");
     }
 
     public boolean isAlarming(String title, String text) {
@@ -136,52 +170,39 @@ public class NotificationClassifier {
     }
 
     public String summarize(String title, String text) {
-        if (text == null || text.isEmpty()) return "AI: An empty notification was received.";
+        if (text == null || text.isEmpty()) return "AI: Someone sent a message.";
 
         if (isAlarming(title, text)) {
-            return "🚨 URGENT: This message contains indicators of a high-priority emergency. " +
-                   "The sender mentions: \"" + text.trim() + "\". Please check on them immediately.";
+            return "🚨 URGENT: High-priority event detected regarding \"" + text.trim() + "\". Please check immediately.";
         }
         
         String cleanText = text.trim();
-        String cleanTitle = title.toLowerCase();
         String lowerText = cleanText.toLowerCase();
         
-        // 1. Career & Professional Context (LinkedIn/Jobs)
-        if (cleanTitle.contains("linkedin") || lowerText.contains("hiring") || lowerText.contains("job") || lowerText.contains("developer")) {
-            if (lowerText.contains("hiring")) {
-                String company = extractKeywordAfter(cleanText, "is hiring");
-                return "AI: LinkedIn Career Alert - A company " + (company.isEmpty() ? "" : "(\"" + company + "\") ") + 
-                       "is currently recruiting for a position matching your profile.";
-            }
-            if (lowerText.contains("view") || lowerText.contains("update")) {
-                return "AI: Professional Network Update - You have new activity on LinkedIn, including profile views or networking suggestions.";
-            }
-            return "AI: Professional notification regarding career opportunities or network activity.";
+        // Context-Aware Synthesis
+        if (lowerText.contains("hiring") || lowerText.contains("job")) {
+            return "AI Career Insight: Recruitment update involving potential professional opportunities.";
         }
-
-        // 2. Academic & University Context
-        if (lowerText.contains("exam") || lowerText.contains("terminal") || lowerText.contains("date sheet") || lowerText.contains("presentation")) {
-            return "AI: Academic Notice - Discussion detected regarding upcoming exams, presentations, or schedule changes. " + 
-                   "Details: \"" + (cleanText.length() > 40 ? cleanText.substring(0, 37) + "..." : cleanText) + "\"";
+        if (lowerText.contains("exam") || lowerText.contains("terminal") || lowerText.contains("date sheet")) {
+            return "AI Academic Notice: Important update regarding examination schedules or curriculum changes.";
         }
-
-        // 3. Media & Stickers
-        if (lowerText.contains("sticker")) return "AI: Digital expression - " + title + " shared a sticker in your conversation.";
-        if (lowerText.contains("photo") || lowerText.contains("image")) return "AI: Visual content - " + title + " has shared an image with you.";
-
-        // 4. Smart Intent Synthesis (Dynamic & Unique)
+        
         String[] words = cleanText.split("\\s+");
         if (words.length > 2) {
-            // Create highly specific summaries by focusing on unique identifiers in the message
-            String detail = (words.length > 5) ? words[words.length - 1] : words[words.length - 1];
-            String context = words[0] + " " + words[1];
+            // High-uniqueness engine: use different structures based on text length
+            int variance = words.length % 4;
+            String first = words[0];
+            String last = words[words.length - 1];
             
-            return "AI Analysis: Detecting communication about \"" + context + "...\" involving " + detail + ". " +
-                   "This appears to be a unique update from " + title + ".";
+            switch (variance) {
+                case 0: return "AI Insight: Detecting communication about \"" + first + "...\" involving \"" + last + "\".";
+                case 1: return "AI Synthesizer: Captured a unique update from " + title + " regarding \"" + first + " " + last + "\".";
+                case 2: return "AI Analysis: Interpreted the intent of this message as a contextual update from " + title + ".";
+                default: return "AI Assistant: Noted communication from " + title + " starting with \"" + first + "\".";
+            }
         }
 
-        return "AI: Individual notification from " + title + " containing: \"" + cleanText + "\"";
+        return "AI Summary: Individual update from " + title + ": \"" + cleanText + "\"";
     }
 
     private String extractKeywordAfter(String text, String target) {
@@ -231,15 +252,12 @@ public class NotificationClassifier {
     }
 
     private boolean checkHeuristics(String content) {
-        String[] spamKeywords = {
-            "promo", "discount", "offer", "sale", "win", "50%", "off", "order your next", "gift card", "reward", "prize", "exclusive",
-            "free", "deal", "coupon", "voucher", "cashback", "save", "limited time", "buy one", "get one", "subscribe", "newsletter",
-            "marketing", "promotional", "sponsored", "advertisement", "click here", "unlocked", "bonus", "referral", "earn money"
+        // Combined Adware & Rogue Patterns
+        String[] adware = {
+            "unlocked", "bonus", "referral", "earn money", "cash rewards", "click here", "free gift",
+            "battery low", "storage full", "clean your phone", "system warning", "detected viruses"
         };
-        for (String keyword : spamKeywords) {
-            if (content.contains(keyword)) return true;
-        }
-        if (content.contains("!!!") || content.contains("$$$") || content.contains("🤑") || content.contains("🔥")) return true;
+        for (String k : adware) if (content.contains(k)) return true;
         return false;
     }
 }

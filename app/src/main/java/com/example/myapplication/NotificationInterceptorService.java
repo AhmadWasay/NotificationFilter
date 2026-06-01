@@ -163,8 +163,24 @@ public class NotificationInterceptorService extends NotificationListenerService 
     private String getAppName(String packageName) {
         try {
             android.content.pm.PackageManager pm = getPackageManager();
-            return (String) pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0));
+            android.content.pm.ApplicationInfo ai = pm.getApplicationInfo(packageName, 0);
+            CharSequence label = pm.getApplicationLabel(ai);
+            return (label != null) ? label.toString() : packageName;
         } catch (Exception e) {
+            // Fallback for common apps if system resolution fails
+            if (packageName.contains("whatsapp")) return "WhatsApp";
+            if (packageName.contains("linkedin")) return "LinkedIn";
+            if (packageName.contains("snapchat")) return "Snapchat";
+            if (packageName.contains("instagram")) return "Instagram";
+            if (packageName.contains("facebook")) return "Facebook";
+            if (packageName.contains("youtube")) return "YouTube";
+            
+            // Extract the last part of package name as a last resort
+            String[] parts = packageName.split("\\.");
+            if (parts.length > 0) {
+                String name = parts[parts.length - 1];
+                return name.substring(0, 1).toUpperCase() + name.substring(1);
+            }
             return packageName;
         }
     }
